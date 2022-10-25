@@ -8,7 +8,7 @@ var ALL_LIST = {
   //'bestexpress': 'Best Express',
   'ninjavan': 'Ninjavan',
   'vnpost': 'VietNam Post',
-  //'vnems': 'VietNam EMS',
+  //'vnems': 'VietNam EMS'
   'viettelpost': 'Viettel Post',
   'spx': 'Shopee Express',
   'jt': 'J&T Express',
@@ -88,23 +88,24 @@ function main(dvvc, mavandon){
   switch(dvvc){
     case 'jt':
       var result = {valid: false}
-      var res = UrlFetchApp.fetch('https://jtexpress.vn/track?billcodes='+mavandon, {"muteHttpExceptions": true})
+      var res = UrlFetchApp.fetch('https://jtexpress.vn/vi/tracking?type=track&billcode='+mavandon, {"muteHttpExceptions": true})
       if(res.getResponseCode() != 200){
         result.valid = false
       }else{
         result.valid = true
         const $ = Cheerio.load(res.getContentText())
-        var mc = $('#accordion .collapse')
-        var times = mc.find('.col-md-2.col-3')
-        var date = times.find('p').first().text().trim()
-        var time = times.find('h5').first().text().trim()
-        var content = $('.col-md-10.col-9 .card-body').first().text().trim()
-        if(date && time && content){
-          result.valid1 = true
-          result.content = {
-            date: date,
-            time: time,
-            text: content
+        const main = $('.result-tracking .tab-content').first()
+        if(main){
+          const lastest = main.find('.result-vandon-item').first()
+          if(lastest){
+            let timeDate = lastest.children().first()
+            let content = lastest.children().last()
+            if(timeDate){
+              result.time = prettifyString(timeDate.text()) || ''
+            }
+            if(content){
+              result.content = prettifyString(content.text()) || ''
+            }
           }
         }
       }
@@ -338,7 +339,7 @@ function deleteVD(dvvc, mavandon){
 
 
 
-
+/* common functions */
 
 function stringMatch(str, mstr){
   str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
@@ -371,12 +372,22 @@ function stringMatch(str, mstr){
 
 
 function prettifyString(str){
-  str = str.replace(/\s/g, ' ')
-  while(str[0] == ' ')
-    str = str.substring(1)
-  while(str[str.length-1] == ' ')
-    str = str.substring(0, str.length-1)
-  return str
+  return str.replace(/\n/g, ' ')
+            .replace(/\r/g, ' ')
+            .replace(/\t/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/^\s+/g, '')
+            .replace(/(\s+)$/g, '')
+}
+
+function prettifyRow(row = [[]]){
+  let newRow = []
+  for(const i in row){
+    if(row[i] && Array.isArray(row[i]) && row[i].length){
+      newRow.push(row[i])
+    }
+  }
+  return newRow
 }
 
 
@@ -385,149 +396,103 @@ function prettifyString(str){
 
 
 function jt(){
-  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("jt")
-  var lastRow = sheet.getLastRow()
+  const parse = (d) => {
+    return {
+      code: d[0],
+      tid: d[1],
+      name: d[2],
+      time: d[3],
+      content: d[4],
+      interval: d[5],
+      _path: {
+        code: 0,
+        tid: 1,
+        name: 2,
+        time: 3,
+        content: 4,
+        interval: 5
+      }
+    }
+  }
 
-  for(var i = 2; i <= lastRow; i++){
-    
-    var sd = sheet.getRange('A'+i+':F'+i).getValues()
-    if(
-      sd[0][0] != '' &&
-      ( (sd[0][5] && new Date().getTime() >= (new Date(sd[0][5]).getTime() + 3600000)) || (sd[0][5] == '') )
-    ){
-      var res = main('jt', sd[0][0])
-      if(res.valid == true){
-        if(res.content){
-          sheet.getRange('F'+i).setValue('')
+  const ss = SpreadsheetApp.openById(SHEET_ID).getSheetByName('jt')
+  if(ss === null) return
+  if(ss.getLastRow() < 2) return
 
-          var time = res.content.time + ' - ' + res.content.date
-          var result = time + '\n' + res.content.text
-          if(time != sd[0][3]){
-            telegramSendText(sd[0][1], '<b>Đơn hàng: ' + sd[0][2] + '</b>\nĐVVC: J&T Express\nMã vận đơn <code> ' + sd[0][0] + ' </code>')
-            var trackKey = {
+  let anyUpdate = false
+  let data = ss.getRange(2, 1, ss.getLastRow()-1, ss.getLastColumn()).getValues()
+
+
+  for(const i in data){
+    try{
+      const d = parse(data[i])
+      if(!d.code){
+        anyUpdate = true
+        for(const j in data[i]) data[i][j] = ''
+        continue
+      }
+      if(d.interval && new Date().getTime() < new Date(d.interval).getTime()+3600000){
+        continue
+      }
+
+      const track = main('jt', d.code)
+      if(track.content){
+        data[d._path.interval] = ''
+        if(track.time != d.time){
+          
+          anyUpdate = true
+          telegramSendText(d.tid, `<b>Đơn hàng: ${d.name}</b>\nĐVVC: J&T Express\nMã vận đơn <code> ${d.code} </code>`)
+          let trackKey = {
               "inline_keyboard": [
-                [{
-                  "text": "Xem toàn bộ",
-                  "url": "https://jtexpress.vn/track?billcodes="+sd[0][0]
-                }],
+                  [ {
+                      "text": "Xem toàn bộ",
+                      "url": "https://jtexpress.vn/vi/tracking?type=track&billcode=" + d.code
+                  } ],
               ]
-            }
-            if(res['content']['text'].indexOf('Đơn hàng đã ký nhận') >= 0){
-              telegramSendText(sd[0][1], result + '\n\nĐơn hàng sẽ được tự động xoá khỏi hệ thống.', trackKey)
-              sheet.getRange('A'+i+':F'+i).clearContent()
-            }else{
-              telegramSendText(sd[0][1], result, trackKey)
-              sheet.getRange('D'+i).setValue(time)
-              sheet.getRange('E'+i).setValue(result)
-            }
           }
-        }else{
-          if(sd[0][5]){
-            sheet.getRange('F'+i).setValue(new Date().getTime())
-          }else{
-            telegramSendText(sd[0][1], '<b>Đã xảy ra lỗi</b>\nCó thể là mã vận đơn không đúng.\nĐơn hàng sẽ được xoá khỏi hệ thống.')
-            sheet.getRange('A'+i+':F'+i).clearContent()
+          if (stringMatch(track.content, 'donhangdakynhan')) {
+            telegramSendText(d.tid,`${track.time}\n${track.content}\n\nĐơn hàng sẽ được tự động xoá khỏi hệ thống.`, trackKey)
+            for(const j in data[i]) data[i][j] = ''              
+          } else {
+            telegramSendText(d.tid, `${track.time}\n${track.content}`, trackKey)
+            data[i][d._path.time] = track.time
+            data[i][d._path.content] = track.content                
           }
+
+        }
+      }else{
+        anyUpdate = true
+        // if user interval
+        if(d.interval){
+          data[i][d._path.interval] = String(new Date().getTime())
+          // send msg để thông báo rằng kiểm tra lỗi, và thời điểm kiểm tra tiếp theo
+        }
+        // if not, remove
+        else{
+          telegramSendText(d.tid, '<b>Đã xảy ra lỗi</b>\nCó thể là mã vận đơn không đúng.\nĐơn hàng sẽ được xoá khỏi hệ thống.')
+          for(const j in data[i]) data[i][j] = ''
         }
       }
-    }
-
+      console.log({
+        dvvc: 'jt',
+        ...d,
+        ...track
+      })
+    }catch(e){ console.warn(e) }
   }
+
+  if(anyUpdate){
+    data = prettifyRow(data)
+    if(data.length){
+      console.log('Set Sheet Value:')
+      console.log(data)
+      ss.getRange(2, 1, ss.getLastRow()-1, ss.getLastColumn()).clearContent()
+      ss.getRange(2, 1, data.length, data[0].length).setValues(data)
+    }
+  }
+
 }
 
-
-
-
-function jtold(){
-  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName("jt");
-  var lastRow = sheet.getLastRow();
-
-  for(var i = 2; i <= lastRow; i++){
-    var code = sheet.getRange('A' + i.toString()).getValue();
-    var uID = sheet.getRange('B' + i.toString()).getValue();
-    var name = sheet.getRange('D' + i.toString()).getValue();
-    var lastTime = sheet.getRange('E' + i.toString()).getValue();
-    var interval = sheet.getRange('H' + i.toString()).getValue();
-
-    if((interval && new Date().getTime() >= (new Date(interval).getTime() + 3600000)) || (interval == '')){
-
-      var response = UrlFetchApp.fetch('https://jtexpress.vn/track?billcodes='+code);
-      var b = response.getBlob().getDataAsString();
-      var d1 = b.substring(b.indexOf('<div class="accordion" id="accordion">'));
-      var n2 = d1.indexOf('<div class="col-md-2 col-3 text-md-center text-left pt-2">')
-
-      //kiếm tra mã đơn có hợp lệ không
-      if(code == '' || uID == ''){
-        sheet.getRange(i,1,1,7).clearContent();
-      }
-      else if(code != '' && n2 < 0){
-        //sheet.getRange('C' + i.toString()).setValue('fail');
-        if(interval == ''){
-          sheet.getRange(i,1,1,7).clearContent();
-          telegramSendText(uID, '<b>Đơn hàng: '+name+'</b>\nĐVVC: J&T express\nMã vận đơn: <code>'+code+'</code>\nĐơn hàng không tồn tại hoặc chưa được cập nhật.')
-        }else{
-          sheet.getRange('H' + i.toString()).setValue(new Date().getTime());
-        }
-      }
-      else{
-        sheet.getRange('C' + i.toString()).setValue('ok');
-        sheet.getRange('H' + i.toString()).setValue('');
-
-        //thời gian
-        var d2 = d1.substring(n2);
-        var d2 = d2.substring(0, d2.indexOf('</div>'));
-        var d3 = d2.substring(d2.indexOf('<h5'), d2.indexOf('</h5>'));
-        var gio = d3.substring(d3.indexOf('>')+1);
-        var d4 = d2.substring(d2.indexOf('<p'), d2.indexOf('</p>'));
-        var ngay = d4.substring(d4.indexOf('>')+1);
-        var time = ngay + ' ' + gio;
-
-        //nội dung
-        var n5 = d1.indexOf('<div class="col-md-10 col-9 pr-4 pb-4">');
-        var n5_ = d1.substring(n5);
-        var d5 = n5_.substring(0, n5_.indexOf('</div>'));
-        var d6 = d5.substring(d5.indexOf('<div class="card-body">')+23);
-        d6 = convertContent(d6);
-
-        //xuất
-        if(time != lastTime){
-          sheet.getRange('E' + i.toString()).setValue(time);
-          sheet.getRange('F' + i.toString()).setValue(time+"\n"+d6);
-          sheet.getRange('G' + i.toString()).clearContent();
-        }
-
-        //gửi tin nhắn
-        if(sheet.getRange('G' + i.toString()).getValue() != '200'){
-          var keyBoard = {
-            "inline_keyboard": [
-              [{
-                "text": "Xem toàn bộ",
-                "url": "https://jtexpress.vn/track?billcodes="+code
-              }],
-            ]
-          }  
-          telegramSendText(uID, '<b>Đơn hàng: '+name+'</b>\nĐVVC: J&T express\nMã vận đơn: <code>'+code+'</code>')
-          var textsent = telegramSendText(uID, '<b>'+time+'</b>\n'+d6, keyBoard)
-          //var res = UrlFetchApp.fetch("https://fchat.vn/api/send?user_id="+mesID+"&block_id=600e8d2d120e3d09d77cd343&token=Glcc5zwLCpWx2ZcgxmyerNOKZBDC48o1LREmDz99Frug30P%2Bqqbf8lRgcIyIR8W0&donhang="+name+"&madonhang="+code+"&dvvc="+dvvc+"&tg="+time+"&nd="+d6);
-          //var resCode = res.getResponseCode();
-          //sheet.getRange('G' + i.toString()).setValue(resCode)
-          if(textsent == true){
-            sheet.getRange('G' + i.toString()).setValue('200');
-          }
-        }
-        Utilities.sleep(2000);
-        //xoá đơn
-        if(d1.indexOf('Đơn hàng đã ký nhận') >= 0 && sheet.getRange('G' + i.toString()).getValue() == "200"){
-          sheet.getRange(i,1,1,7).clearContent();
-          //UrlFetchApp.fetch("https://fchat.vn/api/send?user_id="+mesID+"&block_id=60155014120e3d2f6309657e&token=Glcc5zwLCpWx2ZcgxmyerNOKZBDC48o1LREmDz99Frug30P%2Bqqbf8lRgcIyIR8W0&donhang="+name);
-          telegramSendText(uID, 'Đơn hàng: <b>'+name+'</b> đã được giao thành công.\nChúng tôi sẽ tự động xoá đơn hàng này khỏi danh sách của bạn.')
-        }
-      }
-
-    }
-
-  }
-}
 
 
 
