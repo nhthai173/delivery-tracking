@@ -532,6 +532,13 @@ function ghn(){
           last["action_at"]
         ]
         time = Utilities.formatDate(new Date(r[4]), 'GMT+7', 'HH:mm:ss - dd/MM/yyyy')
+        
+        console.log({
+          status,
+          r,
+          time
+        })
+
         if(time != sd[0][3]){
           telegramSendText(sd[0][1], '<b>Đơn hàng: ' + sd[0][2] + '</b>\nĐVVC: Giao hàng nhanh\nMã vận đơn <code> ' + sd[0][0] + ' </code>')
           var trackKey = {
@@ -542,7 +549,7 @@ function ghn(){
               }],
             ]
           }
-          if(status == 'delivered'){
+          if(status == 'delivered' || status == 'cancel'){
             telegramSendText(sd[0][1], time + '\n' + r[0] + '\n' + r[2] + ghn_pc(r[3]) + '\n\nĐơn hàng sẽ được tự động xoá khỏi hệ thống.', trackKey)
             sheet.getRange('A'+i+':F'+i).clearContent()
           }else{
@@ -552,6 +559,7 @@ function ghn(){
             sheet.getRange('E'+i).setValue(result)
           }
         }
+
       }else{
         if(sd[0][5]){
           sheet.getRange('F'+i).setValue(new Date().getTime())
